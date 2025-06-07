@@ -21,8 +21,8 @@ We achieves high-quality first-frame guided video editing given a reference imag
 
 ```bash
 # Clone the repository with submodules
-git clone --recurse-submodules <your-repo-url>
-cd <your-repo-name>
+git clone --recurse-submodules https://github.com/cjeen/LoRAEdit.git
+cd LoRAEdit
 
 # If you already cloned without submodules, run:
 # git submodule init
