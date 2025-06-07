@@ -125,7 +125,11 @@ class SizeBucketDataset:
         self.size_bucket = size_bucket
         self.model_name = model_name
         self.path = Path(self.directory_config['path'])
-        self.cache_dir = self.path / 'cache' / self.model_name / f'cache_{size_bucket[0]}x{size_bucket[1]}x{size_bucket[2]}'
+        # Handle size_bucket being None, use original dimensions
+        if size_bucket and size_bucket != (None, None, None):
+            self.cache_dir = self.path / 'cache' / self.model_name / f'cache_{size_bucket[0]}x{size_bucket[1]}x{size_bucket[2]}'
+        else:
+            self.cache_dir = self.path / 'cache' / self.model_name / 'cache_original'
         os.makedirs(self.cache_dir, exist_ok=True)
         self.text_embedding_datasets = []
         self.num_repeats = self.directory_config['num_repeats']
@@ -204,7 +208,11 @@ class ConcatenatedBatchedDataset:
             iteration_order[k] = (dataset_idx, cumulative_sums[dataset_idx])
             cumulative_sums[dataset_idx] += 1
         self.iteration_order = iteration_order
-        self.batch_size = batch_size_image if size_bucket[-1] == 1 else batch_size
+        # For original videos, use default batch_size
+        if size_bucket and size_bucket != (None, None, None):
+            self.batch_size = batch_size_image if size_bucket[-1] == 1 else batch_size
+        else:
+            self.batch_size = batch_size  # Use default batch_size
         self._make_divisible_by(self.batch_size)
         self.post_init_called = True
 
@@ -273,18 +281,9 @@ class DirectoryDataset:
             self.validate()
         self.model_name = model_name
         self.framerate = framerate
-        self.enable_ar_bucket = directory_config.get('enable_ar_bucket', dataset_config.get('enable_ar_bucket', False))
-        # Configure directly from user-specified size buckets.
-        self.size_buckets = directory_config.get('size_buckets', dataset_config.get('size_buckets', None))
-        self.use_size_buckets = (self.size_buckets is not None)
-        if self.use_size_buckets:
-            # sort size bucket from longest frame length to shortest
-            self.size_buckets.sort(key=lambda t: t[-1], reverse=True)
-            self.size_buckets = np.array(self.size_buckets)
-        else:
-            self.resolutions = self._process_user_provided_resolutions(
-                directory_config.get('resolutions', dataset_config['resolutions'])
-            )
+        self.enable_ar_bucket = False
+        self.use_size_buckets = False
+        
         self.shuffle = directory_config.get('cache_shuffle_num', dataset_config.get('cache_shuffle_num', 0))
         self.directory_config['cache_shuffle_num'] = self.shuffle # Make accessible if it wasn't yet, for picking one out
         self.shuffle_delimiter = directory_config.get('cache_shuffle_delimiter', dataset_config.get('cache_shuffle_delimiter', ", "))
@@ -301,33 +300,8 @@ class DirectoryDataset:
         if self.default_mask_file is not None and (not self.default_mask_file.exists() or not self.default_mask_file.is_file()):
             raise RuntimeError(f'Invalid default_mask_file: {self.default_mask_file}')
 
-        if self.use_size_buckets:
-            self.ars = np.array([w / h for w, h, _ in self.size_buckets])
-        elif not self.enable_ar_bucket:
-            self.ars = np.array([1.0])
-        elif ars := self.directory_config.get('ar_buckets', self.dataset_config.get('ar_buckets', None)):
-            self.ars = self._process_user_provided_ars(ars)
-        else:
-            min_ar = self.directory_config.get('min_ar', self.dataset_config['min_ar'])
-            max_ar = self.directory_config.get('max_ar', self.dataset_config['max_ar'])
-            num_ar_buckets = self.directory_config.get('num_ar_buckets', self.dataset_config['num_ar_buckets'])
-            self.ars = np.geomspace(min_ar, max_ar, num=num_ar_buckets)
-        self.log_ars = np.log(self.ars)
-        frame_buckets = self.directory_config.get('frame_buckets', self.dataset_config.get('frame_buckets', [1]))
-        if 1 not in frame_buckets:
-            # always have an image bucket for convenience
-            frame_buckets.append(1)
-        frame_buckets.sort()
-        self.frame_buckets = np.array(frame_buckets)
-
     def validate(self):
-        resolutions = self.directory_config.get('resolutions', self.dataset_config.get('resolutions', []))
-        if len(resolutions) > 3:
-            if is_main_process():
-                print('WARNING: You have set a lot of resolutions in the dataset config. Please read the comments in the example dataset.toml file,'
-                      ' and make sure you understand what this setting does. If you still want to proceed with the current configuration,'
-                      ' run the script with the --i_know_what_i_am_doing flag.')
-            quit()
+        pass
 
     def cache_metadata(self, regenerate_cache=False):
         files = list(self.path.glob('*'))
@@ -377,42 +351,30 @@ class DirectoryDataset:
             remove_columns=metadata_dataset.column_names,
         )
 
-        grouped_metadata = defaultdict(lambda: defaultdict(list))
-        for example in metadata_dataset:
-            if self.use_size_buckets:
-                grouping_key = tuple(example['size_bucket'])
-            else:
-                grouping_key = example['ar_bucket']
-                grouping_key = (grouping_key[0], int(grouping_key[1]))
-            d = grouped_metadata[grouping_key]
-            for k, v in example.items():
-                d[k].append(v)
+        # Don't use bucketing, directly create a simple dataset
+        # grouped_metadata = defaultdict(lambda: defaultdict(list))
+        # for example in metadata_dataset:
+        #     if self.use_size_buckets:
+        #         grouping_key = tuple(example['size_bucket'])
+        #     else:
+        #         grouping_key = example['ar_bucket']
+        #         grouping_key = (grouping_key[0], int(grouping_key[1]))
+        #     d = grouped_metadata[grouping_key]
+        #     for k, v in example.items():
+        #         d[k].append(v)
 
-        if self.use_size_buckets:
-            self.size_bucket_datasets = []
-            for size_bucket, metadata in grouped_metadata.items():
-                metadata = datasets.Dataset.from_dict(metadata)
-                self.size_bucket_datasets.append(
-                    SizeBucketDataset(
-                        metadata,
-                        self.directory_config,
-                        size_bucket,
-                        self.model_name,
-                    )
-                )
-        else:
-            self.ar_bucket_datasets = []
-            for ar_bucket, metadata in grouped_metadata.items():
-                metadata = datasets.Dataset.from_dict(metadata)
-                self.ar_bucket_datasets.append(
-                    ARBucketDataset(
-                        ar_bucket,
-                        self.resolutions,
-                        metadata,
-                        self.directory_config,
-                        self.model_name,
-                    )
-                )
+        # Create a simple dataset list, don't use bucketing
+        self.simple_datasets = []
+        # Use original width, height, frames as size_bucket
+        original_size_bucket = (None, None, None)  # Placeholder, will be determined dynamically during preprocessing
+        self.simple_datasets.append(
+            SizeBucketDataset(
+                metadata_dataset,
+                self.directory_config,
+                original_size_bucket,
+                self.model_name,
+            )
+        )
 
     def _set_defaults(self, directory_config, dataset_config):
         directory_config.setdefault('enable_ar_bucket', dataset_config.get('enable_ar_bucket', False))
@@ -448,7 +410,7 @@ class DirectoryDataset:
             if self.directory_config['shuffle_tags'] and self.shuffle == 0: # backwards compatibility
                 self.shuffle = 1
             captions = shuffle_captions(captions, self.shuffle, self.shuffle_delimiter, self.directory_config['caption_prefix'])
-            empty_return = {'image_file': [], 'mask_file': [], 'caption': [], 'ar_bucket': [], 'size_bucket': [], 'is_video': []}
+            empty_return = {'image_file': [], 'mask_file': [], 'caption': [], 'is_video': []}
 
             image_file = Path(image_file)
             if image_file.suffix == '.webp':
@@ -457,18 +419,15 @@ class DirectoryDataset:
                     raise NotImplementedError('WebP videos are not supported.')
             try:
                 if image_file.suffix in VIDEO_EXTENSIONS:
-                    # 100% accurate frame count, but much slower.
-                    # frames = 0
-                    # for frame in imageio.v3.imiter(image_file):
-                    #     frames += 1
-                    #     height, width = frame.shape[:2]
-                    # TODO: this is an estimate of frame count. What happens if variable frame rate? Is
-                    # it still close enough?
+                    # Get original video information, no estimation or modification
+                    # Directly use the original frame count of the video, not relying on framerate
+                    # Simple frame count retrieval
                     meta = imageio.v3.immeta(image_file)
                     first_frame = next(imageio.v3.imiter(image_file))
                     height, width = first_frame.shape[:2]
-                    assert self.framerate is not None, "Need model framerate but don't have it. This shouldn't happen. Is the framerate attribute on the model set?"
-                    frames = int(self.framerate * meta['duration'])
+                    # Directly get frame count from meta, not using framerate estimation
+                    frames = meta.get('fps', 30) * meta.get('duration', 1)  # Use video's own fps
+                    frames = int(frames)
                 else:
                     pil_img = Image.open(image_file)
                     width, height = pil_img.size
@@ -477,107 +436,35 @@ class DirectoryDataset:
                 logger.warning(f'Media file {image_file} could not be opened. Skipping.')
                 return empty_return
             is_video = (frames > 1)
-            log_ar = np.log(width / height)
 
-            if self.use_size_buckets:
-                size_bucket = self._find_closest_size_bucket(log_ar, frames, is_video)
-                if size_bucket is None:
-                    print(f'video with frames={frames} is being skipped because it is too short')
-                    return empty_return
-                ar_bucket = None
-            else:
-                ar_bucket = self._find_closest_ar_bucket(log_ar, frames, is_video)
-                if ar_bucket is None:
-                    print(f'video with frames={frames} is being skipped because it is too short')
-                    return empty_return
-                size_bucket = None
-
+            # Don't use bucketing, directly return original information
             return {
                 'image_file': [str(image_file)],
                 'mask_file': [example['mask_file'][0]],
                 'caption': [captions],
-                'ar_bucket': [ar_bucket],
-                'size_bucket': [size_bucket],
                 'is_video': [is_video]
             }
 
         return fn
 
-    def _find_closest_ar_bucket(self, log_ar, frames, is_video):
-        # Best AR bucket is the one with the smallest AR difference in log space.
-        i = np.argmin(np.abs(log_ar - self.log_ars))
-        # find closest frame bucket where the number of frames is greater than or equal to the bucket
-        diffs = frames - self.frame_buckets
-        positive_diffs = diffs[diffs >= 0]
-        if len(positive_diffs) == 0:
-            # video not long enough to find any valid frame bucket
-            return None
-        j = np.argmin(positive_diffs)
-        if is_video and self.frame_buckets[j] == 1:
-            # don't let video be mapped to the image frame bucket
-            return None
-        ar_bucket = (self.ars[i], self.frame_buckets[j])
-        return ar_bucket
-
-    def _find_closest_size_bucket(self, log_ar, frames, is_video):
-        # Best AR bucket is the one with the smallest AR difference in log space.
-        ar_diffs = np.abs(log_ar - self.log_ars)
-        candidate_size_buckets = self.size_buckets[np.argsort(ar_diffs, kind='stable')]
-        # Find closest size bucket where the number of frames is greater than or equal to the bucket.
-        # self.size_buckets was already sorted longest -> shortest frame length
-        found = False
-        for size_bucket in candidate_size_buckets:
-            if is_video and size_bucket[-1] == 1:
-                # don't let video be mapped to the image frame bucket
-                continue
-            if frames >= size_bucket[-1]:
-                found = True
-                break
-        if not found:
-            # video not long enough to find any valid frame bucket
-            return None
-        return size_bucket
-
-    def _process_user_provided_ars(self, ars):
-        ar_buckets = set()
-        for ar in ars:
-            if isinstance(ar, (tuple, list)):
-                assert len(ar) == 2
-                ar = round(ar[0] / ar[1], 6)
-            ar_buckets.add(ar)
-        ar_buckets = list(ar_buckets)
-        ar_buckets.sort()
-        return np.array(ar_buckets)
-
-    def _process_user_provided_resolutions(self, resolutions):
-        result = set()
-        for res in resolutions:
-            if isinstance(res, (tuple, list)):
-                assert len(res) == 2
-                res = round(math.sqrt(res[0] * res[1]), 6)
-            result.add(res)
-        result = list(result)
-        result.sort()
-        return result
+    # Remove all bucketing-related methods, no longer needed
+    # def _find_closest_ar_bucket(self, log_ar, frames, is_video):
+    # def _find_closest_size_bucket(self, log_ar, frames, is_video):
+    # def _process_user_provided_ars(self, ars):
+    # def _process_user_provided_resolutions(self, resolutions):
 
     def get_size_bucket_datasets(self):
-        if self.use_size_buckets:
-            return self.size_bucket_datasets
-        result = []
-        for ar_bucket_dataset in self.ar_bucket_datasets:
-            result.extend(ar_bucket_dataset.get_size_bucket_datasets())
-        return result
+        # Return simple dataset, don't use bucketing
+        return self.simple_datasets
 
     def cache_latents(self, map_fn, regenerate_cache=False, caching_batch_size=1):
         print(f'caching latents: {self.path}')
-        datasets = self.size_bucket_datasets if self.use_size_buckets else self.ar_bucket_datasets
-        for ds in datasets:
+        for ds in self.simple_datasets:
             ds.cache_latents(map_fn, regenerate_cache=regenerate_cache, caching_batch_size=caching_batch_size)
 
     def cache_text_embeddings(self, map_fn, i, regenerate_cache=False, caching_batch_size=1):
         print(f'caching text embeddings: {self.path}')
-        datasets = self.size_bucket_datasets if self.use_size_buckets else self.ar_bucket_datasets
-        for ds in datasets:
+        for ds in self.simple_datasets:
             ds.cache_text_embeddings(map_fn, i, regenerate_cache=regenerate_cache, caching_batch_size=caching_batch_size)
 
 
@@ -614,14 +501,15 @@ class Dataset:
         self.global_batch_size = self.data_parallel_world_size * self.batch_size
         self.global_batch_size_image = self.data_parallel_world_size * self.batch_size_image
 
-        # group same size_bucket together
-        datasets_by_size_bucket = defaultdict(list)
+        # No longer perform size_bucket grouping, directly collect all datasets
+        all_datasets = []
         for directory_dataset in self.directory_datasets:
-            for size_bucket_dataset in directory_dataset.get_size_bucket_datasets():
-                datasets_by_size_bucket[size_bucket_dataset.size_bucket].append(size_bucket_dataset)
+            all_datasets.extend(directory_dataset.get_size_bucket_datasets())
+        
+        # Create a single bucket containing all datasets
         self.buckets = []
-        for datasets in datasets_by_size_bucket.values():
-            self.buckets.append(ConcatenatedBatchedDataset(datasets))
+        if all_datasets:
+            self.buckets.append(ConcatenatedBatchedDataset(all_datasets))
 
         for bucket in self.buckets:
             bucket.post_init(self.global_batch_size, self.global_batch_size_image)
@@ -719,13 +607,13 @@ def _cache_fn(datasets, queue, preprocess_media_file_fn, num_text_encoders, rege
         ds.cache_metadata(regenerate_cache=regenerate_cache)
 
     def latents_map_fn(example):
-        first_size_bucket = example['size_bucket'][0]
+        # No longer use size_bucket, directly process original dimensions
         tensors_and_masks = []
         image_files = []
         captions = []
-        for path, mask_path, size_bucket, caption in zip(example['image_file'], example['mask_file'], example['size_bucket'], example['caption']):
-            assert size_bucket == first_size_bucket
-            items = preprocess_media_file_fn(path, mask_path, size_bucket)
+        for path, mask_path, caption in zip(example['image_file'], example['mask_file'], example['caption']):
+            # Don't pass size_bucket, use original dimensions
+            items = preprocess_media_file_fn(path, mask_path, None)
             tensors_and_masks.extend(items)
             image_files.extend([path] * len(items))
             captions.extend([caption] * len(items))

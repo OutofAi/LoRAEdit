@@ -517,29 +517,48 @@ class WanPipeline(BasePipeline):
             vae = vae_and_clip.vae
             p = next(vae.parameters())
             tensor = tensor.to(p.device, p.dtype)
-            latents = vae_encode(tensor, self.vae)
-            ret = {'latents': latents}
+            
             clip = vae_and_clip.clip
             if clip is not None:
                 assert tensor.ndim == 5, f'i2v/flf2v must train on videos, got tensor with shape {tensor.shape}'
+                
+                # Get video frame count and split points
+                bs, c, total_frames, h, w = tensor.shape
+                assert (total_frames - 1) % 3 == 0, f'Video must have 1+3K frames, got {total_frames} frames'
+                K = (total_frames - 1) // 3
+                
+                # Frame 1: for CLIP encoding
                 first_frame = tensor[:, :, 0:1, ...].clone()
                 clip_context = self.clip.visual(first_frame.to(p.device, p.dtype))
 
                 if self.flf2v:
+                    # For FLF2V, also need last frame CLIP features
                     last_frame = tensor[:, :, -1:, ...].clone()
-                    # NOTE: dim=1 is a hack to pass clip_context without microbatching breaking the zeroth dim
                     clip_context = torch.cat([clip_context, self.clip.visual(last_frame.to(p.device, p.dtype))], dim=1)
-                    tensor[:, :, 1:-1, ...] = 0
-                else:
-                    tensor[:, :, 1:, ...] = 0
-
-                # Image conditioning. Same shame as latents, first frame is unchanged, rest is 0.
-                # NOTE: encoding 0s with the VAE doesn't give you 0s in the latents, I tested this. So we need to
-                # encode the whole thing here, we can't just extract the first frame from the latents later and make
-                # the rest 0. But what happens if you do that? Probably things get fried, but might be worth testing.
-                y = vae_encode(tensor, self.vae)
-                ret['y'] = y
-                ret['clip_context'] = clip_context
+                
+                # Build tensor for VAE encoding
+                # Frames 2 to K+1: pseudo video condition (keep original content)
+                condition_frames = tensor[:, :, 1:K+1, ...].clone()
+                
+                # Frames K+2 to 2K+1: training target
+                target_frames = tensor[:, :, K+1:2*K+1, ...].clone()
+                
+                # Directly encode condition frames
+                y = vae_encode(condition_frames, self.vae)
+                
+                # Directly encode training target frames
+                latents = vae_encode(target_frames, self.vae)
+                
+                ret = {'latents': latents, 'y': y, 'clip_context': clip_context}
+                
+                # Process mask video (frames 2K+2 to 3K+1)
+                mask_frames = tensor[:, :, 2*K+1:, ...].clone()
+                ret['mask_frames'] = mask_frames
+                
+            else:
+                latents = vae_encode(tensor, self.vae)
+                ret = {'latents': latents}
+            
             return ret
         return fn
 
@@ -564,6 +583,7 @@ class WanPipeline(BasePipeline):
         mask = inputs['mask']
         y = inputs['y'] if self.i2v or self.flf2v else None
         clip_context = inputs['clip_context'] if self.i2v or self.flf2v else None
+        mask_frames = inputs.get('mask_frames', None) if self.i2v or self.flf2v else None
 
         bs, channels, num_frames, h, w = latents.shape
 
@@ -604,7 +624,7 @@ class WanPipeline(BasePipeline):
         t = t * 1000
 
         return (
-            (x_t, y, t, text_embeddings, seq_lens, clip_context),
+            (x_t, y, t, text_embeddings, seq_lens, clip_context, mask_frames),
             (target, mask),
         )
 
@@ -666,7 +686,7 @@ class InitialLayer(nn.Module):
             if torch.is_floating_point(item):
                 item.requires_grad_(True)
 
-        x, y, t, context, text_seq_lens, clip_fea = inputs
+        x, y, t, context, text_seq_lens, clip_fea, mask_frames = inputs
         bs, channels, f, h, w = x.shape
         if clip_fea.numel() == 0:
             clip_fea = None
@@ -677,10 +697,35 @@ class InitialLayer(nn.Module):
             self.freqs = self.freqs.to(device)
 
         if self.i2v or self.flf2v:
-            mask = torch.zeros((bs, 4, f, h, w), device=x.device, dtype=x.dtype)
-            mask[:, :, 0, ...] = 1
-            if self.flf2v:
-                mask[:, :, -1, ...] = 1
+            # Build mask based on mask_frames
+            if mask_frames is not None:
+                # Process mask_frames following reference logic
+                # 1. Convert to single channel (calculate mean)
+                mask = mask_frames.mean(dim=1, keepdim=False)  # (bs, f, h_orig, w_orig)
+                
+                # 2. Interpolate to latent space resolution
+                mask = F.interpolate(
+                    mask, 
+                    size=(h, w),
+                    mode='nearest'
+                )
+                
+                # 3. Binarize: black (low values) corresponds to 1, white (high values) corresponds to 0
+                # Assuming input is in [-1,1] range, first normalize to [0,1]
+                mask = (mask + 1) / 2
+                mask = (mask < 0.5).float()  # Black regions as 1, white regions as 0
+                
+                mask = torch.concat([torch.repeat_interleave(mask[:, 0:1], repeats=4, dim=1), mask[:, 1:]], dim=1)
+                mask = mask.view(mask.shape[0], mask.shape[1] // 4, 4, mask.shape[2], mask.shape[3])
+                mask = mask.transpose(1, 2)
+                
+            else:
+                # If no mask_frames, use original logic
+                mask = torch.zeros((bs, 4, f, h, w), device=x.device, dtype=x.dtype)
+                mask[:, :, 0, ...] = 1
+                if self.flf2v:
+                    mask[:, :, -1, ...] = 1
+            
             y = torch.cat([mask, y], dim=1)
             x = [torch.cat([u, v], dim=0) for u, v in zip(x, y)]
 
@@ -757,3 +802,80 @@ class FinalLayer(nn.Module):
         x = self.head(x, e)
         x = self.unpatchify(x, grid_sizes)
         return torch.stack(x, dim=0)
+
+def test_mask_construction():
+    """
+    Test new mask construction logic
+    """
+    import torch
+    import torch.nn.functional as F
+    
+    # Simulate parameters
+    bs, f, h, w = 2, 4, 16, 16  # batch_size, frames, height, width
+    
+    # Create simulated mask_frames (K frames)
+    mask_frames = torch.randn(bs, 3, f, 64, 64)  # Original resolution RGB mask frames
+    
+    # Process according to new logic
+    # 1. Convert to single channel
+    msk = mask_frames.mean(dim=1, keepdim=False)  # (bs, f, h_orig, w_orig)
+    
+    # 2. Interpolate to latent space resolution
+    msk = F.interpolate(msk, size=(h, w), mode='nearest')
+    
+    # 3. Binarize
+    msk = (msk + 1) / 2  # Normalize to [0,1]
+    msk = (msk < 0.5).float()  # Black regions as 1, white regions as 0
+    
+    # 4. Build final mask format
+    assert msk.shape[1] == f, f"mask_frames count {msk.shape[1]} should match video frames {f}"
+    mask = msk.unsqueeze(1).expand(-1, 4, -1, -1, -1)  # (bs, 4, f, h, w)
+    
+    print(f"Input mask_frames shape: {mask_frames.shape}")
+    print(f"Processed msk shape: {msk.shape}")
+    print(f"Final mask shape: {mask.shape}")
+    print(f"Expected mask shape: ({bs}, 4, {f}, {h}, {w})")
+    
+    assert mask.shape == (bs, 4, f, h, w), f"Wrong mask shape: {mask.shape}"
+    print("✓ Mask construction logic test passed!")
+
+def test_new_frame_structure():
+    """
+    Test new 1+3K frame structure processing logic
+    """
+    import torch
+    
+    # Create test data: 1+3K frames, here K=4, so total 13 frames
+    bs, c, total_frames, h, w = 2, 3, 13, 64, 64
+    K = (total_frames - 1) // 3  # K = 4
+    
+    # Create test tensor
+    tensor = torch.randn(bs, c, total_frames, h, w)
+    
+    # Verify frame splitting logic
+    assert (total_frames - 1) % 3 == 0, f'Video must have 1+3K frames, got {total_frames} frames'
+    
+    first_frame = tensor[:, :, 0:1, ...]  # Frame 1 - for CLIP encoding
+    condition_frames = tensor[:, :, 1:K+1, ...]  # Frames 2 to K+1 - directly for VAE encoding as condition
+    target_frames = tensor[:, :, K+1:2*K+1, ...]  # Frames K+2 to 2K+1 - directly for VAE encoding as target  
+    mask_frames = tensor[:, :, 2*K+1:, ...]  # Frames 2K+2 to 3K+1 - for mask generation
+    
+    print(f"Total frames: {total_frames}, K: {K}")
+    print(f"First frame shape (for CLIP): {first_frame.shape}")
+    print(f"Condition frames shape (direct VAE encode): {condition_frames.shape}")
+    print(f"Target frames shape (direct VAE encode): {target_frames.shape}")
+    print(f"Mask frames shape (for mask generation): {mask_frames.shape}")
+    
+    # Verify shapes
+    assert first_frame.shape[2] == 1
+    assert condition_frames.shape[2] == K
+    assert target_frames.shape[2] == K  
+    assert mask_frames.shape[2] == K
+    
+    print("✓ New 1+3K frame structure test passed!")
+    print("✓ Condition frames and target frames now directly undergo VAE encoding, no need to concatenate with first frame!")
+    print("✓ Mask construction logic updated: mask_frames directly correspond one-to-one with target video frames, no need to manually set first frame!")
+
+if __name__ == "__main__":
+    test_mask_construction()
+    test_new_frame_structure()

@@ -18,57 +18,21 @@ def make_contiguous(*tensors):
     return tuple(x.contiguous() for x in tensors)
 
 
-def extract_clips(video, target_frames, video_clip_mode):
-    # video is (channels, num_frames, height, width)
-    frames = video.shape[1]
-    if frames < target_frames:
-        # TODO: think about how to handle this case. Maybe the video should have already been thrown out?
-        print(f'video with shape {video.shape} is being skipped because it has less than the target_frames')
-        return []
-
-    if video_clip_mode == 'single_beginning':
-        return [video[:, :target_frames, ...]]
-    elif video_clip_mode == 'single_middle':
-        start = int((frames - target_frames) / 2)
-        assert frames-start >= target_frames
-        return [video[:, start:start+target_frames, ...]]
-    elif video_clip_mode == 'multiple_overlapping':
-        # Extract multiple clips so we use the whole video for training.
-        # The clips might overlap a little bit. We never cut anything off the end of the video.
-        num_clips = ((frames - 1) // target_frames) + 1
-        start_indices = torch.linspace(0, frames-target_frames, num_clips).int()
-        return [video[:, i:i+target_frames, ...] for i in start_indices]
-    else:
-        raise NotImplementedError(f'video_clip_mode={video_clip_mode} is not recognized')
+# Remove video clipping function, keep complete video
+# def extract_clips(video, target_frames, video_clip_mode):
 
 
-def convert_crop_and_resize(pil_img, width_and_height):
-    if pil_img.mode not in ['RGB', 'RGBA'] and 'transparency' in pil_img.info:
-        pil_img = pil_img.convert('RGBA')
-
-    # add white background for transparent images
-    if pil_img.mode == 'RGBA':
-        canvas = Image.new('RGBA', pil_img.size, (255, 255, 255))
-        canvas.alpha_composite(pil_img)
-        pil_img = canvas.convert('RGB')
-    else:
-        pil_img = pil_img.convert('RGB')
-
-    return ImageOps.fit(pil_img, width_and_height)
+# Remove size adjustment function, no longer needed
+# def convert_crop_and_resize(pil_img, width_and_height):
 
 
 class PreprocessMediaFile:
     def __init__(self, config, support_video=False, framerate=None, round_height=1, round_width=1, round_frames=1):
         self.config = config
-        self.video_clip_mode = config.get('video_clip_mode', 'single_beginning')
-        print(f'using video_clip_mode={self.video_clip_mode}')
         self.pil_to_tensor = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0.5], [0.5])])
         self.support_video = support_video
         self.framerate = framerate
         print(f'using framerate={self.framerate}')
-        self.round_height = round_height
-        self.round_width = round_width
-        self.round_frames = round_frames
         if self.support_video:
             assert self.framerate
 
@@ -77,25 +41,15 @@ class PreprocessMediaFile:
         if is_video:
             assert self.support_video
             num_frames = 0
-            for frame in imageio.v3.imiter(filepath, fps=self.framerate):
+            for frame in imageio.v3.imiter(filepath):
                 num_frames += 1
                 height, width = frame.shape[:2]
-            video = imageio.v3.imiter(filepath, fps=self.framerate)
+            video = imageio.v3.imiter(filepath)
         else:
             num_frames = 1
             pil_img = Image.open(filepath)
             height, width = pil_img.height, pil_img.width
             video = [pil_img]
-
-        if size_bucket is not None:
-            size_bucket_width, size_bucket_height, size_bucket_frames = size_bucket
-        else:
-            size_bucket_width, size_bucket_height, size_bucket_frames = width, height, num_frames
-
-        height_rounded = round_to_nearest_multiple(size_bucket_height, self.round_height)
-        width_rounded = round_to_nearest_multiple(size_bucket_width, self.round_width)
-        frames_rounded = round_down_to_multiple(size_bucket_frames - 1, self.round_frames) + 1
-        resize_wh = (width_rounded, height_rounded)
 
         if mask_filepath:
             mask_img = Image.open(mask_filepath).convert('RGB')
@@ -107,17 +61,23 @@ class PreprocessMediaFile:
                     f'Image path: {filepath}\n'
                     f'Mask path: {mask_filepath}'
                 )
-            mask_img = ImageOps.fit(mask_img, resize_wh)
             mask = torchvision.transforms.functional.to_tensor(mask_img)[0].to(torch.float16)  # use first channel
         else:
             mask = None
 
-        resized_video = torch.empty((num_frames, 3, height_rounded, width_rounded))
+        resized_video = torch.empty((num_frames, 3, height, width))
         for i, frame in enumerate(video):
             if not isinstance(frame, Image.Image):
                 frame = torchvision.transforms.functional.to_pil_image(frame)
-            cropped_image = convert_crop_and_resize(frame, resize_wh)
-            resized_video[i, ...] = self.pil_to_tensor(cropped_image)
+            if frame.mode not in ['RGB', 'RGBA'] and 'transparency' in frame.info:
+                frame = frame.convert('RGBA')
+            if frame.mode == 'RGBA':
+                canvas = Image.new('RGBA', frame.size, (255, 255, 255))
+                canvas.alpha_composite(frame)
+                frame = canvas.convert('RGB')
+            else:
+                frame = frame.convert('RGB')
+            resized_video[i, ...] = self.pil_to_tensor(frame)
 
         if not self.support_video:
             return [(resized_video.squeeze(0), mask)]
@@ -127,8 +87,7 @@ class PreprocessMediaFile:
         if not is_video:
             return [(resized_video, mask)]
         else:
-            videos = extract_clips(resized_video, frames_rounded, self.video_clip_mode)
-            return [(video, mask) for video in videos]
+            return [(resized_video, mask)]
 
 
 class BasePipeline:
@@ -145,12 +104,16 @@ class BasePipeline:
 
     def configure_adapter(self, adapter_config):
         target_linear_modules = set()
+        exclude_linear_modules = adapter_config.get('exclude_linear_modules', [])
         for name, module in self.transformer.named_modules():
             if module.__class__.__name__ not in self.adapter_target_modules:
                 continue
             for full_submodule_name, submodule in module.named_modules(prefix=name):
                 if isinstance(submodule, nn.Linear):
-                    target_linear_modules.add(full_submodule_name)
+                    # Check if the complete path contains module names to be excluded
+                    should_exclude = any(exclude_name in full_submodule_name for exclude_name in exclude_linear_modules)
+                    if not should_exclude:
+                        target_linear_modules.add(full_submodule_name)
         target_linear_modules = list(target_linear_modules)
 
         adapter_type = adapter_config['type']
