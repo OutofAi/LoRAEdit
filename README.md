@@ -106,9 +106,7 @@ Watch this quick tutorial to see how to use the data preprocessing interface:
 
 https://github.com/user-attachments/assets/a03ee16a-c816-4284-8f45-a3cbbed4c702
 
-### Step 1: 
-
-Data Preprocessing
+### Step 1: Data Preprocessing
 
 Launch the data preprocessing interface:
 
