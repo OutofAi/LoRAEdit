@@ -100,28 +100,21 @@ wget https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_large.p
 ```
 
 ## 🚀 Usage
+### Tutorial Video
 
-### Step 1: Data Preprocessing
+Watch this quick tutorial to see how to use the data preprocessing interface:
+
+https://github.com/user-attachments/assets/a03ee16a-c816-4284-8f45-a3cbbed4c702
+
+### Step 1: 
+
+Data Preprocessing
 
 Launch the data preprocessing interface:
 
 ```bash
 python predata_app.py --port 8890 --checkpoint_dir models_sam/sam2_hiera_large.pt
 ```
-
-This will start a Gradio web interface where you can:
-1. **Upload Video or Select Image Directory**: Load your input video or frame sequence
-2. **Extract Frames**: Configure target frame count (must follow 4N+1 format, range 5-81) and resolution
-3. **Annotate Object**: Click points on the first frame to select the object to edit
-4. **Generate Masks**: Submit mask for tracking throughout the video
-5. **Process and Save Data**: Configure training parameters and save preprocessed data
-
-The interface will automatically:
-- Extract and process video frames
-- Generate object masks using SAM2
-- Create training sequences
-- Generate configuration files for LoRA training
-- Provide training commands
 
 ### Step 2: LoRA Training
 
