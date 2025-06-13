@@ -1,6 +1,6 @@
 # LoRA-Edit: Controllable First-Frame-Guided Video Editing via Mask-Aware LoRA Fine-Tuning
 
-[[Paper]](https://arxiv.org/pdf/2506.10082) | [[Project Page]](https://cjeen.github.io/LoraEditPaper/)
+[[Paper]](https://arxiv.org/pdf/2506.10082) | [[Project Page]](https://cjeen.github.io/LoraEditPaper/) | [[Demo]](https://www.youtube.com/watch?v=xOUnpG7hqL8)
 
 <div align="center">
   <img src="assets/figs_teaser.png" alt="LoRA-Edit Teaser" width="800"/>
