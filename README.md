@@ -1,5 +1,7 @@
 # LoRA-Edit: Controllable First-Frame-Guided Video Editing via Mask-Aware LoRA Fine-Tuning
 
+[[Paper]](https://arxiv.org/pdf/2506.10082) | [[Project Page]](https://cjeen.github.io/LoraEditPaper/)
+
 <div align="center">
   <img src="assets/figs_teaser.png" alt="LoRA-Edit Teaser" width="800"/>
 </div>
@@ -12,7 +14,7 @@ We achieves high-quality first-frame guided video editing given a reference imag
 ## 🛠️ Environment Setup
 
 ### Prerequisites
-- CUDA-compatible GPU with sufficient VRAM
+- CUDA-compatible GPU with sufficient VRAM (We use a single GeForce RTX 4090 (24GB))
 - Python 3.12 (recommended)
 - Git
 - Miniconda or Anaconda
