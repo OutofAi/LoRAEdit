@@ -2,6 +2,18 @@
 
 [[Paper]](https://arxiv.org/pdf/2506.10082) | [[Project Page]](https://cjeen.github.io/LoraEditPaper/)
 
+> 💡 **Important Notes**:
+> 1. Unlike similar video editing techniques such as VACE, we leverage powerful image editing models to edit the first frame, thereby transferring image editing capabilities to video editing.
+> 2. Our project currently runs at a moderate speed, taking 30-50 minutes to edit 49 frames on RTX 4090. We are actively working on optimizations (A faster version will be available this month).
+> 3. The ComfyUI version is currently facing challenges as we haven't found a suitable node for training Wan I2V LoRA in ComfyUI.
+> 4. We welcome your issues and contributions to our project!
+
+> 📝 **TODO List**:
+> 1. ✅ Upload first-frame-guided video editing code (Completed)
+> 2. 🔄 Upload additional reference code (Expected before UTC 2025.06.15)
+> 3. 🔄 Upload detailed memory and speed report on RTX 4090 (Expected before UTC 2025.06.15)
+> 4. 🔄 Optimize memory usage and speed
+
 <div align="center">
   <img src="assets/figs_teaser.png" alt="LoRA-Edit Teaser" width="800"/>
 </div>
