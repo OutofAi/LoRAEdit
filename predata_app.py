@@ -781,12 +781,49 @@ weight_decay = 0.01
         os.makedirs(output_dir, exist_ok=True)
         
         try:
-            # 1. Generate training sequence
+            # 1. Save original frames to source_frames directory
+            source_frames_dir = os.path.join(output_dir, 'source_frames')
+            os.makedirs(source_frames_dir, exist_ok=True)
+            
+            guru.info("Saving original frames to source_frames directory...")
+            for i, img_path in enumerate(self.img_paths):
+                # Read image and convert to RGB
+                img = Image.open(img_path).convert('RGB')
+                # Save as PNG
+                output_path = os.path.join(source_frames_dir, f'{i:05d}.png')
+                img.save(output_path)
+            guru.info(f"Original frames saved to: {source_frames_dir}")
+            
+            # 2. Save original masks to source_masks directory
+            source_masks_dir = os.path.join(output_dir, 'source_masks')
+            os.makedirs(source_masks_dir, exist_ok=True)
+            
+            guru.info("Saving original masks to source_masks directory...")
+            for i, mask in enumerate(self.masks_all):
+                # Convert binary mask to image (0-255)
+                mask_img = (mask * 255).astype(np.uint8)
+                # Save as PNG
+                output_path = os.path.join(source_masks_dir, f'{i:05d}.png')
+                Image.fromarray(mask_img).save(output_path)
+            guru.info(f"Original masks saved to: {source_masks_dir}")
+            
+            # 3. Save concept prefix to prefix.txt
+            prefix_file_path = os.path.join(output_dir, 'prefix.txt')
+            with open(prefix_file_path, 'w', encoding='utf-8') as f:
+                f.write(concept_prefix)
+            guru.info(f"Concept prefix saved to: {prefix_file_path}")
+            
+            # 4. Create additional_edited_frames directory
+            additional_frames_dir = os.path.join(output_dir, 'additional_edited_frames')
+            os.makedirs(additional_frames_dir, exist_ok=True)
+            guru.info(f"Created additional_edited_frames directory: {additional_frames_dir}")
+            
+            # 5. Generate training sequence
             guru.info("Generating training sequence...")
             video_name, train_dir = self.generate_training_sequence(output_dir)
             
             if video_name and train_dir:
-                # 2. Generate txt file with same name as mp4 (using Florence model to generate caption)
+                # 6. Generate txt file with same name as mp4 (using Florence model to generate caption)
                 txt_filename = video_name.replace('.mp4', '.txt')
                 txt_path = os.path.join(output_dir, 'traindata', txt_filename)
                 
@@ -802,11 +839,11 @@ weight_decay = 0.01
                 guru.info(f"Text file: {txt_path}")
                 guru.info(f"Generated caption: {caption_text[:80]}..." if len(caption_text) > 80 else f"Generated caption: {caption_text}")
             
-            # 3. Generate inference videos
+            # 7. Generate inference videos
             guru.info("Generating inference videos...")
             rgb_video, mask_video = self.create_inference_videos(output_dir)
             
-            # 4. Create training configuration files
+            # 8. Create training configuration files
             if ckpt_path:
                 guru.info("Generating training configuration files...")
                 configs_dir, dataset_config_path, training_config_path = self.create_configs(
@@ -818,6 +855,10 @@ weight_decay = 0.01
             total_frames = len(self.bbox_masks_all)
             message_parts = [
                 f"Complete data processing finished! Processed {total_frames} frames in total.",
+                f"📁 Source frames: {source_frames_dir}",
+                f"📁 Source masks: {source_masks_dir}",
+                f"📝 Concept prefix: {prefix_file_path}",
+                f"📁 Additional edited frames: {additional_frames_dir}",
                 f"📁 Training data: {train_dir}",
                 f"🎬 Inference RGB video: {rgb_video}" if rgb_video else "",
                 f"🎭 Inference mask video: {mask_video}" if mask_video else ""
