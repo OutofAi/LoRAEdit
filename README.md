@@ -1,5 +1,7 @@
 # LoRA-Edit: Controllable First-Frame-Guided Video Editing via Mask-Aware LoRA Fine-Tuning
 
+[[Paper]](https://arxiv.org/pdf/2506.10082) | [[Project Page]](https://cjeen.github.io/LoraEditPaper/) | [[Demo]](https://www.youtube.com/watch?v=xOUnpG7hqL8)
+
 <div align="center">
   <img src="assets/figs_teaser.png" alt="LoRA-Edit Teaser" width="800"/>
 </div>
@@ -9,10 +11,27 @@ We achieves high-quality first-frame guided video editing given a reference imag
 
 - **[2025.06.07]** LoRA-Edit first-frame-guided-editing code is now available! 🎉
 
+## Important Notes
+
+1. Unlike similar video editing techniques such as VACE, we leverage powerful image editing models to edit the first frame, thereby transferring image editing capabilities to video editing.
+
+2. Our project currently runs at a moderate speed, taking 30-50 minutes to edit 49 frames on RTX 4090. We are actively working on optimizations (A faster version will be available this month).
+
+3. The ComfyUI version is currently facing challenges as we haven't found a suitable node for training Wan I2V LoRA in ComfyUI.
+
+4. We welcome your issues and contributions to our project!
+
+## TODO List
+
+- [x] Upload first-frame-guided video editing code (Completed)
+- [ ] Upload additional reference code (Expected before UTC 2025.06.15)
+- [ ] Upload detailed memory and speed report on RTX 4090 (Expected before UTC 2025.06.15)
+- [ ] Optimize memory usage and speed
+
 ## 🛠️ Environment Setup
 
 ### Prerequisites
-- CUDA-compatible GPU with sufficient VRAM
+- CUDA-compatible GPU with sufficient VRAM (We use a single GeForce RTX 4090 (24GB))
 - Python 3.12 (recommended)
 - Git
 - Miniconda or Anaconda
@@ -100,6 +119,11 @@ wget https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_large.p
 ```
 
 ## 🚀 Usage
+### Tutorial Video
+
+Watch this quick tutorial to see how to use the data preprocessing interface:
+
+https://github.com/user-attachments/assets/a03ee16a-c816-4284-8f45-a3cbbed4c702
 
 ### Step 1: Data Preprocessing
 
@@ -108,20 +132,6 @@ Launch the data preprocessing interface:
 ```bash
 python predata_app.py --port 8890 --checkpoint_dir models_sam/sam2_hiera_large.pt
 ```
-
-This will start a Gradio web interface where you can:
-1. **Upload Video or Select Image Directory**: Load your input video or frame sequence
-2. **Extract Frames**: Configure target frame count (must follow 4N+1 format, range 5-81) and resolution
-3. **Annotate Object**: Click points on the first frame to select the object to edit
-4. **Generate Masks**: Submit mask for tracking throughout the video
-5. **Process and Save Data**: Configure training parameters and save preprocessed data
-
-The interface will automatically:
-- Extract and process video frames
-- Generate object masks using SAM2
-- Create training sequences
-- Generate configuration files for LoRA training
-- Provide training commands
 
 ### Step 2: LoRA Training
 
