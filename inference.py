@@ -3,6 +3,7 @@ import os
 import glob
 import argparse
 import re
+import random
 from PIL import Image
 from diffsynth import ModelManager, save_video, VideoData
 from custom_wan_pipe import WanVideoPipeline
@@ -219,15 +220,22 @@ def main(model_root_dir, data_dir):
         generated_prompt = generate_caption(input_image, concept_prefix=concept_prefix)
         print(f"Generated prompt: {generated_prompt}")
 
+        # Generate random seed
+        random_seed = random.randint(0, 2**32 - 1)
+        print(f"Using random seed: {random_seed}")
+
         print("Starting inference...")
         video = pipe(
             prompt=generated_prompt,
-            negative_prompt="",
+            negative_prompt="Overexposure, static, blurred details, subtitles, paintings, pictures, still, overall gray, worst quality, low quality, JPEG compression residue, ugly, mutilated, redundant fingers, poorly painted hands, poorly painted faces, deformed, disfigured, deformed limbs, fused fingers, cluttered background, three legs, a lot of people in the background, upside down",
             input_image=input_image,
             pseudo_video_path=pseudo_video_path,
             mask_video_path=mask_video_path,
             num_inference_steps=30,
-            seed=0, tiled=True,
+            seed=random_seed, tiled=True,
+            # TeaCache parameters
+            tea_cache_l1_thresh=0.275, # The larger this value is, the faster the speed, but the worse the visual quality.
+            tea_cache_model_id="Wan2.1-I2V-14B-480P", # Choose one in (Wan2.1-T2V-1.3B, Wan2.1-T2V-14B, Wan2.1-I2V-14B-480P, Wan2.1-I2V-14B-720P).
         )
         
         output_path = os.path.join(data_dir, "edited_video.mp4")
