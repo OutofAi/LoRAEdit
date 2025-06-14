@@ -228,9 +228,6 @@ def main(model_root_dir, data_dir):
             mask_video_path=mask_video_path,
             num_inference_steps=30,
             seed=0, tiled=True,
-            # TeaCache parameters
-            tea_cache_l1_thresh=0.275, # The larger this value is, the faster the speed, but the worse the visual quality.
-            tea_cache_model_id="Wan2.1-I2V-14B-480P", # Choose one in (Wan2.1-T2V-1.3B, Wan2.1-T2V-14B, Wan2.1-I2V-14B-480P, Wan2.1-I2V-14B-720P).
         )
         
         output_path = os.path.join(data_dir, "edited_video.mp4")

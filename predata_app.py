@@ -794,17 +794,15 @@ weight_decay = 0.01
                 img.save(output_path)
             guru.info(f"Original frames saved to: {source_frames_dir}")
             
-            # 2. Save original masks to source_masks directory
+            # 2. Save bbox masks to source_masks directory
             source_masks_dir = os.path.join(output_dir, 'source_masks')
             os.makedirs(source_masks_dir, exist_ok=True)
             
-            guru.info("Saving original masks to source_masks directory...")
-            for i, mask in enumerate(self.masks_all):
-                # Convert binary mask to image (0-255)
-                mask_img = (mask * 255).astype(np.uint8)
-                # Save as PNG
+            guru.info("Saving bbox masks to source_masks directory...")
+            for i, bbox_mask in enumerate(self.bbox_masks_all):
+                # bbox_mask is already in 0-255 format, no need to convert
                 output_path = os.path.join(source_masks_dir, f'{i:05d}.png')
-                Image.fromarray(mask_img).save(output_path)
+                Image.fromarray(bbox_mask).save(output_path)
             guru.info(f"Original masks saved to: {source_masks_dir}")
             
             # 3. Save concept prefix to prefix.txt
@@ -1026,7 +1024,7 @@ def make_demo(
                 with gr.Row():
                     precision_field = gr.Dropdown(
                         choices=["fp8", "fp16"], 
-                        value="fp8", 
+                        value="fp16", 
                         label="Training Precision",
                         info="fp8: Saves more VRAM but requires newer GPU; fp16: Better compatibility"
                     )
@@ -1038,7 +1036,7 @@ def make_demo(
                 
                 with gr.Row():
                     learning_rate_field = gr.Number(
-                        0.001, label="Learning Rate", 
+                        0.0001, label="Learning Rate", 
                         minimum=1e-6, maximum=1e-1, step=1e-5,
                         info="fp8 recommended 1e-3, fp16 recommended 1e-4"
                     )
