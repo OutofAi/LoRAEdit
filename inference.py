@@ -82,11 +82,16 @@ def generate_caption(image, concept_prefix=""):
 
     return caption_text
 
-def find_max_epoch_lora(data_dir):
+def find_max_epoch_lora(data_dir, use_additional=False):
     """Find the lora file with maximum epoch"""
-    lora_base_dir = os.path.join(data_dir, "lora")
+    lora_dir_name = "lora_additional" if use_additional else "lora"
+    lora_base_dir = os.path.join(data_dir, lora_dir_name)
     if not os.path.exists(lora_base_dir):
-        raise FileNotFoundError(f"LoRA directory does not exist: {lora_base_dir}")
+        if use_additional:
+            raise FileNotFoundError(f"Additional LoRA directory does not exist: {lora_base_dir}\n"
+                                  f"Please train additional LoRA first using: python train.py --config {os.path.join(data_dir, 'configs', 'training_additional.toml')}")
+        else:
+            raise FileNotFoundError(f"LoRA directory does not exist: {lora_base_dir}")
     
     # Find all date directories
     date_dirs = [d for d in os.listdir(lora_base_dir) if os.path.isdir(os.path.join(lora_base_dir, d))]
@@ -118,7 +123,8 @@ def find_max_epoch_lora(data_dir):
     if not os.path.exists(lora_file_path):
         raise FileNotFoundError(f"LoRA file does not exist: {lora_file_path}")
     
-    print(f"Found LoRA file with maximum epoch: epoch{max_epoch_num} - {lora_file_path}")
+    lora_type = "additional" if use_additional else "standard"
+    print(f"Found {lora_type} LoRA file with maximum epoch: epoch{max_epoch_num} - {lora_file_path}")
     return lora_file_path
 
 def find_input_image(data_dir):
@@ -161,7 +167,7 @@ def validate_paths(model_root_dir, data_dir):
     if not diffusion_model_files:
         raise FileNotFoundError(f"No diffusion model files found, pattern: {diffusion_model_pattern}")
 
-def main(model_root_dir, data_dir):
+def main(model_root_dir, data_dir, use_additional=False):
     """Main function"""
     try:
         # Validate paths
@@ -170,7 +176,7 @@ def main(model_root_dir, data_dir):
         
         # Infer various paths
         print("Inferring paths...")
-        lora_path = find_max_epoch_lora(data_dir)
+        lora_path = find_max_epoch_lora(data_dir, use_additional=use_additional)
         input_image_path = find_input_image(data_dir)
         pseudo_video_path = os.path.join(data_dir, "inference_rgb.mp4")
         mask_video_path = os.path.join(data_dir, "inference_mask.mp4")
@@ -214,8 +220,22 @@ def main(model_root_dir, data_dir):
         # Load edited image
         input_image = Image.open(input_image_path)
 
+        # Read concept prefix from prefix.txt
+        prefix_file = os.path.join(data_dir, 'prefix.txt')
+        concept_prefix = ""
+        if os.path.exists(prefix_file):
+            try:
+                with open(prefix_file, 'r', encoding='utf-8') as f:
+                    concept_prefix = f.read().strip()
+                print(f"Read concept prefix from {prefix_file}: {concept_prefix}")
+            except Exception as e:
+                print(f"Failed to read prefix.txt file: {e}")
+                concept_prefix = "p3rs0n,"  # Use default value
+        else:
+            print(f"prefix.txt file not found: {prefix_file}, using default prefix")
+            concept_prefix = "p3rs0n,"
+
         # Dynamically generate prompt
-        concept_prefix = "p3ers0n,"  # Special prompt prefix
         print("Generating caption for edited image...")
         generated_prompt = generate_caption(input_image, concept_prefix=concept_prefix)
         print(f"Generated prompt: {generated_prompt}")
@@ -250,7 +270,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Video generation inference script")
     parser.add_argument("--model_root_dir", required=True, help="Model root directory path")
     parser.add_argument("--data_dir", required=True, help="Data directory path")
+    parser.add_argument("--additional", action="store_true", 
+                       help="Use additional LoRA model from lora_additional directory instead of standard lora directory")
     
     args = parser.parse_args()
     
-    main(args.model_root_dir, args.data_dir)
+    main(args.model_root_dir, args.data_dir, use_additional=args.additional)
