@@ -873,8 +873,14 @@ weight_decay = 0.01
                     f'NCCL_P2P_DISABLE="1" NCCL_IB_DISABLE="1" deepspeed --num_gpus=1 train.py --deepspeed --config {training_config_path}',
                     "",
                     "🎬 After training completes, perform inference:",
-                    f"1. Save the edited first frame as: {output_dir}/edited_image.png (or .jpg)",
-                    f"2. Run inference command: python inference.py --model_root_dir {ckpt_path} --data_dir {output_dir}"
+                    f"1. Save the edited first frame (from {output_dir}/source_frames/00000.png) as: {output_dir}/edited_image.png (or .jpg)",
+                    f"2. Run inference command: python inference.py --model_root_dir {ckpt_path} --data_dir {output_dir}",
+                    "",
+                    "🎯 For additional edited frames as reference:",
+                    f"1. Put your edited frames (from {output_dir}/source_frames) to {output_dir}/additional_edited_frames",
+                    f"2. Run: python predata_additional.py --data_dir {output_dir}",
+                    f"3. Train additional LoRA: NCCL_P2P_DISABLE=\"1\" NCCL_IB_DISABLE=\"1\" deepspeed --num_gpus=1 train.py --deepspeed --config {output_dir}/configs/training_additional.toml",
+                    f"4. Run inference with additional frames: python inference.py --model_root_dir {ckpt_path} --data_dir {output_dir} --additional"
                 ])
             
             message = "\n".join([part for part in message_parts if part])
