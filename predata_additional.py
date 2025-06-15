@@ -11,6 +11,7 @@ from collections import defaultdict
 import torch
 import glob
 from transformers import AutoProcessor, AutoModelForCausalLM
+import toml
 
 # Global variables for storing model and processor
 florence_model = None
@@ -301,6 +302,135 @@ def process_video_directory(video_dir, output_dir, temp_dir, concept_prefix=""):
     
     return sequences
 
+def find_latest_lora_checkpoint(lora_dir):
+    """Find the latest checkpoint in lora directory"""
+    if not os.path.exists(lora_dir):
+        return None
+    
+    # Look for epoch directories
+    epoch_dirs = []
+    for item in os.listdir(lora_dir):
+        item_path = os.path.join(lora_dir, item)
+        if os.path.isdir(item_path):
+            # Check if it's a timestamp directory or direct epoch directory
+            if item.startswith('epoch'):
+                epoch_dirs.append((item, item_path))
+            else:
+                # Check subdirectories for epoch folders
+                for subitem in os.listdir(item_path):
+                    subitem_path = os.path.join(item_path, subitem)
+                    if os.path.isdir(subitem_path) and subitem.startswith('epoch'):
+                        epoch_dirs.append((subitem, subitem_path))
+    
+    if not epoch_dirs:
+        return None
+    
+    # Sort by epoch number and return the latest
+    def extract_epoch_num(epoch_name):
+        match = re.search(r'epoch(\d+)', epoch_name)
+        return int(match.group(1)) if match else 0
+    
+    epoch_dirs.sort(key=lambda x: extract_epoch_num(x[0]), reverse=True)
+    return epoch_dirs[0][1]
+
+def create_additional_configs(data_dir):
+    """Create training_additional.toml and dataset_additional.toml based on existing configs"""
+    configs_dir = os.path.join(data_dir, 'configs')
+    
+    # Check if configs directory exists
+    if not os.path.exists(configs_dir):
+        print(f"Warning: configs directory does not exist: {configs_dir}")
+        return
+    
+    # Paths for existing configs
+    training_config_path = os.path.join(configs_dir, 'training.toml')
+    dataset_config_path = os.path.join(configs_dir, 'dataset.toml')
+    
+    # Check if existing configs exist
+    if not os.path.exists(training_config_path):
+        print(f"Warning: training.toml not found: {training_config_path}")
+        return
+    
+    if not os.path.exists(dataset_config_path):
+        print(f"Warning: dataset.toml not found: {dataset_config_path}")
+        return
+    
+    try:
+        # Read existing configs
+        with open(training_config_path, 'r', encoding='utf-8') as f:
+            training_config = toml.load(f)
+        
+        with open(dataset_config_path, 'r', encoding='utf-8') as f:
+            dataset_config = toml.load(f)
+        
+        # Create additional_dataset.toml
+        additional_dataset_config = dataset_config.copy()
+        
+        # Add additional_traindata directory to dataset config
+        additional_traindata_path = os.path.join(data_dir, 'additional_traindata').replace(os.sep, '/')
+        additional_directory = {
+            'path': additional_traindata_path,
+            'num_repeats': 9
+        }
+        
+        # Ensure directory list exists
+        if 'directory' not in additional_dataset_config:
+            additional_dataset_config['directory'] = []
+        
+        # Add the additional directory
+        additional_dataset_config['directory'].append(additional_directory)
+        
+        # Save additional dataset config
+        additional_dataset_path = os.path.join(configs_dir, 'dataset_additional.toml')
+        with open(additional_dataset_path, 'w', encoding='utf-8') as f:
+            toml.dump(additional_dataset_config, f)
+        
+        print(f"Created dataset_additional.toml: {additional_dataset_path}")
+        
+        # Create additional_training.toml
+        additional_training_config = training_config.copy()
+        
+        # Modify paths and settings for additional training
+        original_output_dir = additional_training_config.get('output_dir', './lora')
+        additional_output_dir = original_output_dir.replace('/lora', '/lora_additional')
+        additional_training_config['output_dir'] = additional_output_dir
+        
+        # Point to additional dataset config
+        additional_training_config['dataset'] = additional_dataset_path.replace(os.sep, '/')
+        
+        # Reduce epochs for additional training (assuming it's fine-tuning)
+        additional_training_config['epochs'] = 10
+        
+        # More frequent saves for shorter training
+        if 'save_every_n_epochs' in additional_training_config:
+            additional_training_config['save_every_n_epochs'] = 5
+        
+        # Find the latest checkpoint from original lora training
+        lora_dir = os.path.join(data_dir, 'lora')
+        latest_checkpoint = find_latest_lora_checkpoint(lora_dir)
+        
+        if latest_checkpoint:
+            # Add init_from_existing to adapter section
+            if 'adapter' not in additional_training_config:
+                additional_training_config['adapter'] = {}
+            additional_training_config['adapter']['init_from_existing'] = latest_checkpoint.replace(os.sep, '/')
+            print(f"Will initialize additional training from: {latest_checkpoint}")
+        else:
+            print("Warning: No existing lora checkpoint found for initialization")
+        
+        # Save additional training config
+        additional_training_path = os.path.join(configs_dir, 'training_additional.toml')
+        with open(additional_training_path, 'w', encoding='utf-8') as f:
+            toml.dump(additional_training_config, f)
+        
+        print(f"Created training_additional.toml: {additional_training_path}")
+        
+        return additional_training_path, additional_dataset_path
+        
+    except Exception as e:
+        print(f"Error creating additional configs: {e}")
+        return None
+
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Generate training sequences for edited images')
@@ -358,6 +488,17 @@ def main():
     shutil.rmtree(temp_dir, ignore_errors=True)
     
     print(f"\nProcessing completed, all data saved to: {output_dir}")
+    
+    # Create additional training configs
+    print("\nCreating additional training configurations...")
+    config_result = create_additional_configs(args.data_dir)
+    
+    if config_result:
+        print("Additional configuration files created successfully!")
+        print(f"You can now run additional training with:")
+        print(f"python train.py --config {config_result[0]}")
+    else:
+        print("Failed to create additional configuration files.")
 
 if __name__ == '__main__':
     main() 
