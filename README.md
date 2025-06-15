@@ -9,11 +9,12 @@ We achieves high-quality first-frame guided video editing given a reference imag
 
 ## 📰 News
 
+- **[2025.06.15]** Additional edited frames as guidance is now available! 🎉
 - **[2025.06.07]** LoRA-Edit first-frame-guided-editing code is now available! 🎉
 
 ## Important Notes
 
-1. Unlike similar video editing techniques such as VACE, we leverage powerful image editing models to edit the first frame, thereby transferring image editing capabilities to video editing.
+1. Unlike video editing techniques such as VACE, our method itself does not provide visual editing capabilities. Instead, we leverage powerful image editing models to edit the first frame (or more frames), thereby transferring image editing capabilities to video editing.
 
 2. Our project currently runs at a moderate speed, taking 30-50 minutes to edit 49 frames on RTX 4090. We are actively working on optimizations (A faster version will be available this month).
 
@@ -24,7 +25,7 @@ We achieves high-quality first-frame guided video editing given a reference imag
 ## TODO List
 
 - [x] Upload first-frame-guided video editing code (Completed)
-- [ ] Upload additional reference code (Expected before UTC 2025.06.15)
+- [x] Upload additional reference code (~~Expected before UTC 2025.06.15~~, Completed)
 - [ ] Upload detailed memory and speed report on RTX 4090 (Expected before UTC 2025.06.15)
 - [ ] Optimize memory usage and speed
 
@@ -125,6 +126,8 @@ Watch this quick tutorial to see how to use the data preprocessing interface:
 
 https://github.com/user-attachments/assets/a03ee16a-c816-4284-8f45-a3cbbed4c702
 
+*Note: A new tutorial video covering additional reference frames will be available soon.*
+
 ### Step 1: Data Preprocessing
 
 Launch the data preprocessing interface:
@@ -151,6 +154,26 @@ After training completes, run inference:
 python inference.py --model_root_dir ./Wan2.1-I2V-14B-480P --data_dir ./processed_data/your_sequence
 ```
 
+### Step 4: Additional Edited Frames as Reference (Optional)
+
+For more precise control using multiple edited frames as reference:
+
+```bash
+# 1. Put your edited frames from source_frames to additional_edited_frames directory
+# Edit frames from ./processed_data/your_sequence/source_frames/
+# Save edited frames to ./processed_data/your_sequence/additional_edited_frames/
+# Important: Keep the same filename (e.g., 00000.png, 00001.png, etc.)
+
+# 2. Preprocess additional data
+python predata_additional.py --data_dir ./processed_data/your_sequence
+
+# 3. Train additional LoRA (much faster than previous LoRA training)
+NCCL_P2P_DISABLE="1" NCCL_IB_DISABLE="1" deepspeed --num_gpus=1 train.py --deepspeed --config ./processed_data/your_sequence/configs/training_additional.toml
+
+# 4. Run inference with additional frames guidance
+python inference.py --model_root_dir ./Wan2.1-I2V-14B-480P --data_dir ./processed_data/your_sequence --additional
+```
+
 ## 📁 Directory Structure
 
 ```
@@ -163,6 +186,8 @@ project_root/
 ├── Wan2.1-I2V-14B-480P/    # Wan2.1 model directory
 ├── processed_data/         # Processed training data
 │   └── your_sequence/
+│       ├── source_frames/  # Original frames for editing
+│       ├── additional_edited_frames/  # Your edited frames for additional reference
 │       ├── traindata/      # Training videos and captions
 │       ├── configs/        # Training configuration files
 │       ├── lora/          # Trained LoRA checkpoints
@@ -174,6 +199,8 @@ project_root/
 
 ## 🙏 Acknowledgments
 
-This project is built upon [diffusion-pipe](https://github.com/tdrussell/diffusion-pipe) by tdrussell. We gratefully acknowledge their excellent work in providing a solid foundation for pipeline parallel training of diffusion models.
+We would like to express our sincere gratitude to [Wan2.1](https://github.com/Wan-Video/Wan2.1) for open-sourcing their powerful Image-to-Video model, which serves as the foundation for our work.
+
+This project is built upon [diffusion-pipe](https://github.com/tdrussell/diffusion-pipe) by tdrussell. We gratefully acknowledge their excellent work in providing a solid foundation for memory-efficient training of diffusion models.
 
 The SAM2 GUI interface in this project references code from [SAM2-GUI](https://github.com/YunxuanMao/SAM2-GUI) by YunxuanMao. We thank them for their contribution to the SAM2 community with their intuitive interface design.
