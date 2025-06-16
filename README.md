@@ -26,7 +26,7 @@ We achieves high-quality first-frame guided video editing given a reference imag
 
 - [x] Upload first-frame-guided video editing code (Completed)
 - [x] Upload additional reference code (~~Expected before UTC 2025.06.15~~, Completed)
-- [ ] Upload detailed memory and speed report on RTX 4090 (Expected before UTC 2025.06.15)
+- [x] Upload detailed memory and speed report on RTX 4090 (~~Expected before UTC 2025.06.15~~, Completed)
 - [ ] Optimize memory usage and speed
 
 ## 🛠️ Environment Setup
@@ -143,6 +143,21 @@ After preprocessing, use the generated training command (example):
 ```bash
 NCCL_P2P_DISABLE="1" NCCL_IB_DISABLE="1" deepspeed --num_gpus=1 train.py --deepspeed --config ./processed_data/your_sequence/configs/training.toml
 ```
+
+#### 🏁 Training Cost
+
+The table below summarizes the training speed and memory usage for different numbers of frames at 480P (832×480) resolution on an RTX 4090, helping you estimate the resource requirements for your own experiments.  
+All results on our [project page](https://cjeen.github.io/LoraEditPaper/) are obtained by training for 100 steps under the 49-frame setting at 480P (832×480).
+
+| Number of Frames | Time per Iteration (sec) | Memory Usage (MB) |
+|:---------------:|:------------------------:|:-----------------:|
+|        5        |          7.55            |     11,086        |
+|       13        |         10.81            |     12,496        |
+|       21        |         14.79            |     14,456        |
+|       49        |         31.88            |     21,522        |
+|     65&nbsp;†   |         45.71            |     20,416        |
+
+<sup>† For 65 frames, <code>blocks_to_swap</code> was set to 38 instead of the default 32.</sup>
 
 ### Step 3: Video Generation
 
