@@ -30,3 +30,4 @@ gradio
 imageio
 fastapi==0.112.2
 diffsynth
+git+https://github.com/facebookresearch/sam2.git

@@ -49,52 +49,31 @@ cd LoRAEdit
 # git submodule update
 ```
 
-### 2. Install Miniconda (if not already installed)
+### 2. Install PyTorch
 
-Download and install from: https://docs.anaconda.com/miniconda/
+Install PyTorch compatible with your CUDA version. Check your CUDA version with `nvcc -V` and choose the appropriate installation command from [PyTorch official website](https://pytorch.org/get-started/locally/).
 
-### 3. Create Conda Environment
-
-```bash
-# Create environment with Python 3.12
-conda create -n lora-edit python=3.12
-conda activate lora-edit
-```
-
-### 4. Install PyTorch
-
-**Important**: Install PyTorch 2.6.0 with CUDA 12.4 for flash attention compatibility:
+**Examples for common CUDA versions:**
 
 ```bash
-pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+# For CUDA 11.8
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+# For CUDA 12.1  
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# For CUDA 12.4
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 ```
 
-### 5. Install NVCC
-
-Install nvcc to match your CUDA version: https://anaconda.org/nvidia/cuda-nvcc
-
-```bash
-conda install -c nvidia cuda-nvcc
-```
-
-### 6. Install Dependencies
+### 3. Install Dependencies
 
 ```bash
 # Install Python dependencies
 pip install -r requirements.txt
 ```
 
-### 7. Install SAM2
-
-```bash
-# Clone and install SAM2
-git clone https://github.com/facebookresearch/sam2.git
-cd sam2
-pip install -e .
-cd ..
-```
-
-### 8. Download Models
+### 4. Download Models
 
 #### Download Wan2.1-I2V Model
 ```bash
